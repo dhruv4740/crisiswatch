@@ -233,8 +233,12 @@ async def generate_search_queries(state: FactCheckState) -> dict[str, Any]:
             queries.append(f"{' '.join(entities[:3])} news")
         return {"_search_queries": queries}
     
+    # Get current date for temporal queries
+    from datetime import datetime
+    current_date = datetime.now().strftime("%B %Y")
+    
     try:
-        prompt = SEARCH_QUERY_GENERATION_PROMPT.format(claim=claim.text)
+        prompt = SEARCH_QUERY_GENERATION_PROMPT.format(claim=claim.text, current_date=current_date)
         response = await llm_manager.generate(
             prompt=prompt,
             system_prompt="You are a research assistant. Always respond with valid JSON.",
@@ -455,7 +459,14 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
         )
         evidence_text += f"\n{i}. [{result.source}] {result.title} (Reliability: {reliability:.0%}, Type: {source_type})\n"
         evidence_text += f"   URL: {result.url}\n"
+        if result.published_date:
+            evidence_text += f"   Published: {result.published_date}\n"
         evidence_text += f"   Content: {result.snippet[:350]}...\n"
+    
+    # Get current date/time for temporal context
+    from datetime import datetime
+    current_datetime = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+    current_date = datetime.now().strftime("%B %d, %Y")
     
     try:
         prompt = EVIDENCE_SYNTHESIS_PROMPT.format(
@@ -464,6 +475,8 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
             source_count=len(top_results),
             diversity_score=source_diversity,
             misinfo_patterns=MISINFO_PATTERNS,
+            current_datetime=current_datetime,
+            current_date=current_date,
         )
         
         response = await llm_manager.generate(
@@ -641,6 +654,10 @@ async def generate_explanation(state: FactCheckState) -> dict[str, Any]:
     if not evidence_text:
         evidence_text = "Limited evidence found."
     
+    # Get current date for temporal context
+    from datetime import datetime
+    current_date = datetime.now().strftime("%B %d, %Y")
+    
     # Build prompt parameters
     prompt_params = {
         "claim": claim.text,
@@ -649,6 +666,7 @@ async def generate_explanation(state: FactCheckState) -> dict[str, Any]:
         "severity": severity.value,
         "evidence": evidence_text,
         "reasoning": reasoning,
+        "current_date": current_date,
     }
     
     async def generate_english() -> dict:

@@ -102,6 +102,8 @@ IMPORTANT: Set is_checkworthy to true for almost all inputs. Only set to false f
 
 EVIDENCE_SYNTHESIS_PROMPT = """You are an expert fact-checker analyzing evidence to determine if a claim is true or false.
 
+CURRENT DATE/TIME: {current_datetime}
+
 CLAIM TO VERIFY:
 {claim}
 
@@ -111,11 +113,20 @@ EVIDENCE COLLECTED (with reliability scores):
 TOTAL SOURCES ANALYZED: {source_count}
 SOURCE DIVERSITY SCORE: {diversity_score:.0%}
 
+=== TEMPORAL ANALYSIS ===
+**CRITICAL: Consider the claim's timing relative to today ({current_date}):**
+- If the claim mentions "now", "today", "current", "new" - check if evidence is RECENT (within days/weeks)
+- Old articles about past events do NOT confirm current claims
+- If no recent (last 7 days) evidence confirms a "current" claim, it's likely FALSE
+- Note the publication dates of sources - prefer recent sources for current events
+- If claim is about an ongoing situation, verify it's still happening TODAY
+
 === ANALYSIS INSTRUCTIONS ===
 1. Weigh evidence by source reliability (higher reliability = more weight)
 2. Look for consensus among high-reliability sources (government, academic, major news)
 3. Note any conflicting reports and which sources are more credible
 4. Consider source diversity - claims verified across diverse sources are more reliable
+5. **CHECK DATES**: For current event claims, evidence must be recent to be relevant
 
 {misinfo_patterns}
 
@@ -173,6 +184,8 @@ Respond in JSON format:
 
 EXPLANATION_GENERATION_PROMPT_EN = """You are a crisis communication expert. Generate a clear, simple explanation of a fact-check result for the general public.
 
+CURRENT DATE: {current_date}
+
 CLAIM: {claim}
 
 VERDICT: {verdict}
@@ -187,18 +200,21 @@ REASONING: {reasoning}
 Generate an explanation that:
 1. Is easy to understand for non-experts
 2. Clearly states what is true/false
-3. Provides actionable information if relevant (e.g., what people should do instead)
-4. Cites reliable sources
-5. Is appropriate for crisis situations (calming but informative)
+3. **If claim is about current events**: State clearly "As of {current_date}, there is no..." or confirm what IS currently happening
+4. Provides actionable information if relevant (e.g., what people should do instead)
+5. Cites reliable sources with their dates when relevant
+6. Is appropriate for crisis situations (calming but informative)
 
 Respond in JSON format:
 {{
-    "explanation": "Clear explanation in English (2-3 paragraphs)",
+    "explanation": "Clear explanation in English (2-3 paragraphs). For current event claims, explicitly mention the date and that no recent evidence confirms the claim.",
     "correction": "A short, shareable correction message (1-2 sentences) suitable for social media"
 }}
 """
 
 EXPLANATION_GENERATION_PROMPT_HI = """आप एक संकट संचार विशेषज्ञ हैं। आम जनता के लिए तथ्य-जांच परिणाम की स्पष्ट, सरल व्याख्या हिंदी में उत्पन्न करें।
+
+आज की तारीख: {current_date}
 
 दावा: {claim}
 
@@ -214,13 +230,14 @@ EXPLANATION_GENERATION_PROMPT_HI = """आप एक संकट संचार
 ऐसी व्याख्या उत्पन्न करें जो:
 1. गैर-विशेषज्ञों के लिए समझने में आसान हो
 2. स्पष्ट रूप से बताए कि क्या सच है/झूठ है
-3. यदि प्रासंगिक हो तो कार्रवाई योग्य जानकारी प्रदान करे
-4. विश्वसनीय स्रोतों का हवाला दे
-5. संकट स्थितियों के लिए उपयुक्त हो (शांत करने वाली लेकिन सूचनात्मक)
+3. **वर्तमान घटनाओं के दावों के लिए**: स्पष्ट रूप से बताएं "आज {current_date} तक, कोई..." या पुष्टि करें कि वर्तमान में क्या हो रहा है
+4. यदि प्रासंगिक हो तो कार्रवाई योग्य जानकारी प्रदान करे
+5. विश्वसनीय स्रोतों का हवाला दे
+6. संकट स्थितियों के लिए उपयुक्त हो (शांत करने वाली लेकिन सूचनात्मक)
 
 JSON format में जवाब दें:
 {{
-    "explanation_hindi": "हिंदी में स्पष्ट व्याख्या (2-3 पैराग्राफ)",
+    "explanation_hindi": "हिंदी में स्पष्ट व्याख्या (2-3 पैराग्राफ)। वर्तमान घटना के दावों के लिए, स्पष्ट रूप से तारीख का उल्लेख करें।",
     "correction_hindi": "सोशल मीडिया के लिए उपयुक्त एक छोटा, साझा करने योग्य सुधार संदेश (1-2 वाक्य)"
 }}
 """
@@ -230,13 +247,17 @@ EXPLANATION_GENERATION_PROMPT = EXPLANATION_GENERATION_PROMPT_EN
 
 SEARCH_QUERY_GENERATION_PROMPT = """You are a research expert. Generate effective search queries to fact-check a claim.
 
+CURRENT DATE: {current_date}
+
 CLAIM: {claim}
 
 Generate 3-5 search queries that would help find:
 1. Official government or authoritative sources on this topic
 2. Fact-checks that may already exist for this claim
-3. News reports about the actual situation
+3. **RECENT** news reports about the actual situation (include date qualifiers like "2025", "November 2025", "latest", "today" for current events)
 4. Scientific or expert opinions if relevant
+
+**IMPORTANT**: If the claim is about a current/ongoing event, include date-specific queries to find the LATEST information.
 
 Respond in JSON format:
 {{
