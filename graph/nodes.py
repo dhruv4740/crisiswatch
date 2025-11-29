@@ -147,17 +147,25 @@ async def extract_claim(state: FactCheckState) -> dict[str, Any]:
     raw_input = state["raw_input"]
     language = state.get("language", "en")
     
+    # Quick validation - if input is too short, just use it directly
+    if len(raw_input.strip()) < 10:
+        return {
+            "claim": Claim(text=raw_input.strip(), language=language),
+            "error": None,
+        }
+    
     try:
         prompt = CLAIM_EXTRACTION_PROMPT.format(text=raw_input)
         response = await llm_manager.generate(
             prompt=prompt,
-            system_prompt="You are a fact-checking assistant. Always respond with valid JSON.",
+            system_prompt="You are a fact-checking assistant. Always respond with valid JSON. Be generous - most claims can be fact-checked.",
             temperature=0.3,
         )
         
         parsed = _parse_json_response(response)
         
-        if not parsed.get("is_checkworthy", True):
+        # Only reject if explicitly marked as not checkworthy AND we have a good reason
+        if parsed.get("is_checkworthy") == False and "opinion" in parsed.get("reason", "").lower():
             return {
                 "claim": None,
                 "error": f"Claim not checkworthy: {parsed.get('reason', 'Not a verifiable factual claim')}",

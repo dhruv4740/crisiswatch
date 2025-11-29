@@ -77,20 +77,27 @@ CLAIM_EXTRACTION_PROMPT = """You are an expert at analyzing text to identify fac
 
 Given the following text, extract the main factual claim(s) that should be fact-checked. Focus on claims that:
 1. Are verifiable (can be proven true or false with evidence)
-2. Relate to crisis situations (natural disasters, health emergencies, civil unrest, etc.)
-3. Could cause harm if false (dangerous advice, misinformation, panic-inducing)
+2. Make specific factual assertions about events, people, statistics, or statements
+3. Could be misleading if false
+
+Note: Almost any factual statement can be checked. Be generous - if someone wants to fact-check something, help them.
 
 Text to analyze:
 {text}
 
 Respond in JSON format:
 {{
-    "main_claim": "The primary factual claim to verify",
-    "crisis_type": "earthquake|flood|health|civil_unrest|other|none",
+    "main_claim": "The primary factual claim to verify (restate clearly)",
+    "crisis_type": "health|politics|science|celebrity|business|sports|technology|other",
     "entities": ["list", "of", "key", "entities", "mentioned"],
-    "is_checkworthy": true/false,
-    "reason": "Brief explanation of why this claim should/shouldn't be checked"
+    "is_checkworthy": true,
+    "reason": "Brief explanation of what will be verified"
 }}
+
+IMPORTANT: Set is_checkworthy to true for almost all inputs. Only set to false for:
+- Pure opinions with no factual basis (e.g., "pizza is the best food")
+- Nonsensical or empty input
+- Requests that aren't asking about facts
 """
 
 EVIDENCE_SYNTHESIS_PROMPT = """You are an expert fact-checker analyzing evidence to determine if a claim is true or false.
