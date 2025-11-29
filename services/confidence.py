@@ -7,11 +7,29 @@ from typing import Optional
 from models.schemas import Evidence, VerdictType, SeverityLevel
 
 
+# Known pseudoscience keywords that warrant high confidence FALSE verdicts
+PSEUDOSCIENCE_KEYWORDS = [
+    "urine cure", "cow urine", "gomutra", "urine therapy",
+    "bleach cure", "mms cure", "miracle mineral",
+    "5g cause", "5g corona", "5g covid",
+    "vaccine autism", "vaccines cause autism",
+    "flat earth", "earth is flat",
+    "homeopathy cure cancer", "homeopathic cancer",
+    "crystal heal", "healing crystals cure",
+    "essential oil cure", "oils cure cancer",
+    "alkaline water cure", "alkaline diet cancer",
+    "black salve", "colloidal silver cure",
+    "turpentine cure", "kerosene medicine",
+    "magnetic therapy cure", "magnet heal",
+]
+
+
 class ConfidenceCalibrator:
     """
     Calibrates confidence scores based on evidence patterns.
     
     Rules:
+    - If claim matches known pseudoscience → force high confidence
     - If 3+ high-reliability sources agree → boost confidence
     - If fact-check org already debunked → high confidence for FALSE verdict
     - If official source contradicts claim → boost confidence
@@ -21,12 +39,13 @@ class ConfidenceCalibrator:
     
     # Thresholds
     HIGH_RELIABILITY_THRESHOLD = 0.8
-    FACTCHECK_BOOST = 0.15
-    OFFICIAL_BOOST = 0.12
-    AGREEMENT_BOOST_PER_SOURCE = 0.05
+    FACTCHECK_BOOST = 0.20  # Increased from 0.15
+    OFFICIAL_BOOST = 0.15   # Increased from 0.12
+    AGREEMENT_BOOST_PER_SOURCE = 0.06  # Increased from 0.05
     CONFLICT_PENALTY = 0.15
     MIN_CONFIDENCE = 0.1
     MAX_CONFIDENCE = 0.98
+    PSEUDOSCIENCE_MIN_CONFIDENCE = 0.90  # Minimum for known pseudoscience
     
     def calibrate(
         self,
@@ -34,6 +53,7 @@ class ConfidenceCalibrator:
         verdict: VerdictType,
         evidence: list[Evidence],
         search_results: list = None,
+        claim_text: str = None,
     ) -> tuple[float, str]:
         """
         Calibrate confidence score based on evidence.
@@ -43,6 +63,7 @@ class ConfidenceCalibrator:
             verdict: The verdict assigned
             evidence: List of Evidence objects
             search_results: Raw search results (optional)
+            claim_text: Original claim text for pseudoscience detection (optional)
             
         Returns:
             Tuple of (calibrated_confidence, reasoning)
@@ -52,6 +73,17 @@ class ConfidenceCalibrator:
         
         confidence = base_confidence
         adjustments = []
+        
+        # Rule 0: Check for known pseudoscience patterns
+        if claim_text and verdict in [VerdictType.FALSE, VerdictType.MOSTLY_FALSE]:
+            claim_lower = claim_text.lower()
+            for keyword in PSEUDOSCIENCE_KEYWORDS:
+                if keyword in claim_lower:
+                    if confidence < self.PSEUDOSCIENCE_MIN_CONFIDENCE:
+                        old_conf = confidence
+                        confidence = max(confidence, self.PSEUDOSCIENCE_MIN_CONFIDENCE)
+                        adjustments.append(f"Boosted from {old_conf:.0%} to {confidence:.0%}: matches known debunked pseudoscience pattern")
+                    break
         
         # Count stance distribution
         supports = sum(1 for e in evidence if e.stance == "supports")
@@ -127,6 +159,7 @@ def calibrate_confidence(
     base_confidence: float,
     verdict: VerdictType,
     evidence: list[Evidence],
+    claim_text: str = None,
 ) -> tuple[float, str]:
     """
     Convenience function to calibrate confidence.
@@ -135,9 +168,10 @@ def calibrate_confidence(
         base_confidence: Original confidence score
         verdict: The verdict assigned
         evidence: List of Evidence objects
+        claim_text: Original claim text for pseudoscience detection (optional)
         
     Returns:
         Tuple of (calibrated_confidence, reasoning)
     """
     calibrator = ConfidenceCalibrator()
-    return calibrator.calibrate(base_confidence, verdict, evidence)
+    return calibrator.calibrate(base_confidence, verdict, evidence, claim_text=claim_text)

@@ -53,6 +53,24 @@ MISINFO_PATTERNS = """
 - "Do your own research" (when dismissing evidence)
 - "Miracle cure" / "One weird trick"
 - "Wake up sheeple"
+
+**KNOWN DEBUNKED PSEUDOSCIENCE CLAIMS (ALWAYS FALSE WITH HIGH CONFIDENCE):**
+- Urine therapy / cow urine cures diseases or cancer (American Cancer Society debunked)
+- Drinking bleach or MMS cures diseases
+- 5G causes COVID-19 or cancer
+- Vaccines cause autism (thoroughly debunked)
+- Flat earth claims
+- Homeopathy cures serious diseases
+- Crystal healing cures cancer
+- Essential oils cure diseases
+- Magnetism or magnets heal the body
+- Alkaline water cures cancer
+- "Natural" cures that big pharma is "hiding"
+- Colloidal silver as medicine
+- Black salve cures cancer
+- Turpentine or kerosene as medicine
+
+If a claim matches any of these well-documented pseudoscience patterns, it should be rated FALSE with 90%+ confidence.
 """
 
 CLAIM_EXTRACTION_PROMPT = """You are an expert at analyzing text to identify factual claims that can be verified.
@@ -97,12 +115,20 @@ SOURCE DIVERSITY SCORE: {diversity_score:.0%}
 === CONFIDENCE CALIBRATION GUIDE ===
 Set confidence based on these criteria:
 
-0.90-1.00: Multiple high-reliability sources (gov/academic) directly confirm/refute claim
+**AUTOMATIC HIGH CONFIDENCE (0.90-0.98):**
+- Claim matches KNOWN DEBUNKED PSEUDOSCIENCE (cow urine cures, anti-vax myths, etc.)
+- Scientific consensus clearly refutes the claim (e.g., medical claims contradicting established science)
+- Multiple fact-check organizations have already debunked identical/similar claims
+- Official health organizations (WHO, CDC, ACS) have explicitly refuted the claim
+
+0.90-1.00: Multiple high-reliability sources (gov/academic) directly confirm/refute claim OR matches known debunked pseudoscience
 0.75-0.89: Strong consensus from reliable news + at least one official source
 0.60-0.74: Majority of sources agree, but missing official/academic confirmation
 0.45-0.59: Mixed evidence OR sources are lower reliability OR limited coverage
 0.30-0.44: Conflicting reports from similar-tier sources OR only 1-2 sources found
 0.00-0.29: Unable to find direct evidence; mostly inference or tangential sources
+
+**IMPORTANT:** Do NOT give low confidence to obviously false pseudoscience claims just because "some people believe it". Scientific consensus determines truth, not popularity.
 
 === SEVERITY ASSESSMENT ===
 - CRITICAL: Could cause immediate physical harm, death, or mass panic

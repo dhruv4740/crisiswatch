@@ -508,6 +508,7 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
             base_confidence=base_confidence,
             verdict=verdict,
             evidence=evidence_list,
+            claim_text=claim,  # Pass claim for pseudoscience pattern detection
         )
         
         # Calculate overall reliability score (average of evidence)
