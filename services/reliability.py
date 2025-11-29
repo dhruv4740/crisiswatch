@@ -127,7 +127,7 @@ def _check_domain_patterns(domain: str) -> tuple[float, str]:
         (OFFICIAL_DOMAINS, "official"),
         (FACTCHECK_DOMAINS, "fact_check"),
         (MAJOR_NEWS_DOMAINS, "news"),
-        (ACADEMIC_DOMAINS, "academic"),
+        (ACADEMIC_DOMAINS, "official"),  # Map academic to 'official' for schema compatibility
     ]:
         if domain in domains_dict:
             return domains_dict[domain], source_type
@@ -135,9 +135,9 @@ def _check_domain_patterns(domain: str) -> tuple[float, str]:
     # Check suffix patterns for academic
     for suffix, score in [(".edu", 0.80), (".ac.in", 0.80), (".ac.uk", 0.80), (".gov", 0.90), (".gov.in", 0.93)]:
         if domain.endswith(suffix):
-            return score, "official" if "gov" in suffix else "academic"
+            return score, "official"  # Both gov and academic domains map to 'official'
     
-    return 0.0, "unknown"
+    return 0.0, "web"  # Return 'web' instead of 'unknown' for schema compatibility
 
 
 class SourceReliabilityScorer:

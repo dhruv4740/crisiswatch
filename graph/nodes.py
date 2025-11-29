@@ -119,6 +119,9 @@ def _rank_by_reliability(results: list[SearchResult]) -> list[SearchResult]:
 
 def _parse_json_response(text: str) -> dict:
     """Parse JSON from LLM response, handling common issues."""
+    if not text:
+        return {}
+        
     # Try to find JSON in the response
     text = text.strip()
     
@@ -126,7 +129,14 @@ def _parse_json_response(text: str) -> dict:
     if "```json" in text:
         text = text.split("```json")[1].split("```")[0]
     elif "```" in text:
-        text = text.split("```")[1].split("```")[0]
+        parts = text.split("```")
+        if len(parts) >= 2:
+            text = parts[1]
+            # If it starts with a language identifier, skip to next line
+            if text.startswith(("json", "JSON")):
+                text = text[4:].strip()
+    
+    text = text.strip()
     
     try:
         return json.loads(text)
@@ -488,33 +498,54 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
         
         # Build evidence list with reliability scoring
         evidence_list = []
-        for finding in parsed.get("key_findings", []):
-            source_name = finding.get("source", "Unknown")
-            # Try to find matching search result for URL and published_date
-            source_url = None
-            published_date = None
-            for sr in search_results:
-                if source_name.lower() in sr.title.lower() or source_name.lower() in sr.source.lower():
-                    source_url = sr.url
-                    published_date = sr.published_date
-                    break
-            
-            # Get reliability score
-            reliability, source_type = get_reliability_score(
-                url=source_url or "",
-                source_name=source_name,
-                tool_source="web",
-            )
-            
-            evidence_list.append(Evidence(
-                source_name=source_name,
-                source_type=source_type,
-                source_url=source_url,
-                snippet=finding.get("finding", ""),
-                stance=finding.get("stance", "neutral"),
-                reliability_score=reliability,
-                published_date=published_date,
-            ))
+        key_findings = parsed.get("key_findings", [])
+        
+        if key_findings and len(key_findings) > 0:
+            for finding in key_findings:
+                source_name = finding.get("source", "Unknown")
+                # Try to find matching search result for URL and published_date
+                source_url = None
+                published_date = None
+                for sr in search_results:
+                    if source_name.lower() in sr.title.lower() or source_name.lower() in sr.source.lower():
+                        source_url = sr.url
+                        published_date = sr.published_date
+                        break
+                
+                # Get reliability score
+                reliability, source_type = get_reliability_score(
+                    url=source_url or "",
+                    source_name=source_name,
+                    tool_source="web",
+                )
+                
+                evidence_list.append(Evidence(
+                    source_name=source_name,
+                    source_type=source_type,
+                    source_url=source_url,
+                    snippet=finding.get("finding", ""),
+                    stance=finding.get("stance", "neutral"),
+                    reliability_score=reliability,
+                    published_date=published_date,
+                ))
+        else:
+            # Fallback: Create evidence directly from search results if LLM didn't provide key_findings
+            for sr in search_results[:5]:  # Limit to top 5
+                tool_source = sr.source.split(":")[0] if ":" in sr.source else sr.source
+                reliability, source_type = get_reliability_score(
+                    url=sr.url,
+                    source_name=sr.title,
+                    tool_source=tool_source,
+                )
+                evidence_list.append(Evidence(
+                    source_name=sr.title[:50] if sr.title else sr.source,
+                    source_type=source_type,
+                    source_url=sr.url,
+                    snippet=sr.snippet[:300] if sr.snippet else "",
+                    stance="neutral",  # We don't know stance without LLM analysis
+                    reliability_score=reliability,
+                    published_date=sr.published_date,
+                ))
         
         # Calibrate confidence based on evidence patterns
         base_confidence = float(parsed.get("confidence", 0.5))
@@ -522,7 +553,7 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
             base_confidence=base_confidence,
             verdict=verdict,
             evidence=evidence_list,
-            claim_text=claim,  # Pass claim for pseudoscience pattern detection
+            claim_text=claim.text,  # Pass claim text (string) for pseudoscience pattern detection
         )
         
         # Calculate overall reliability score (average of evidence)
@@ -542,12 +573,38 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
         
     except Exception as e:
         print(f"Evidence synthesis error: {e}")
+        
+        # Fallback: Create evidence directly from search results even on error
+        evidence_list = []
+        for sr in search_results[:5]:
+            tool_source = sr.source.split(":")[0] if ":" in sr.source else sr.source
+            reliability, source_type = get_reliability_score(
+                url=sr.url,
+                source_name=sr.title,
+                tool_source=tool_source,
+            )
+            evidence_list.append(Evidence(
+                source_name=sr.title[:50] if sr.title else sr.source,
+                source_type=source_type,
+                source_url=sr.url,
+                snippet=sr.snippet[:300] if sr.snippet else "",
+                stance="neutral",
+                reliability_score=reliability,
+                published_date=sr.published_date,
+            ))
+        
+        overall_reliability = 0.0
+        if evidence_list:
+            overall_reliability = sum(e.reliability_score for e in evidence_list) / len(evidence_list)
+        
         return {
-            "evidence": [],
+            "evidence": evidence_list,
             "verdict": VerdictType.UNVERIFIABLE,
             "confidence": 0.3,
             "severity": SeverityLevel.MEDIUM,
-            "_reasoning": "Error during analysis",
+            "overall_reliability": overall_reliability,
+            "source_diversity": source_diversity,
+            "_reasoning": f"Error during analysis: {str(e)}",
         }
 
 
