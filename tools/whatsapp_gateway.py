@@ -8,7 +8,6 @@ from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from tools.base import BaseTool
 from config import get_settings
 
 
@@ -37,7 +36,7 @@ class WhatsAppMessage(BaseModel):
         return "low"
 
 
-class WhatsAppGatewayTool(BaseTool):
+class WhatsAppGatewayTool:
     """
     WhatsApp message gateway for receiving crisis-related messages.
     

@@ -33,6 +33,7 @@ streamlit>=1.40.0
 # API Framework
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9  # Required for form data parsing (WhatsApp webhook)
 
 # API integrations
 tavily-python>=0.5.0
