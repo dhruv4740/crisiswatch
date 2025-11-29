@@ -1265,12 +1265,7 @@ async def whatsapp_webhook_verify():
 
 
 @app.post("/api/webhook/whatsapp", tags=["WhatsApp"])
-async def whatsapp_webhook(
-    From: str = "",
-    Body: str = "",
-    NumMedia: int = 0,
-    MediaUrl0: Optional[str] = None,
-):
+async def whatsapp_webhook(request: Request):
     """
     Twilio WhatsApp webhook endpoint.
     
@@ -1285,12 +1280,21 @@ async def whatsapp_webhook(
     """
     from tools import WhatsAppGatewayTool
     
+    # Parse form data (Twilio sends as application/x-www-form-urlencoded)
+    form_data = await request.form()
+    From = form_data.get("From", "")
+    Body = form_data.get("Body", "")
+    NumMedia = int(form_data.get("NumMedia", 0))
+    MediaUrl0 = form_data.get("MediaUrl0")
+    
     # Log incoming request for debugging
-    print(f"[WhatsApp] Received message from {From}: {Body[:50]}...")
+    print(f"[WhatsApp] Received from {From}: '{Body}'")
+    print(f"[WhatsApp] Form data keys: {list(form_data.keys())}")
+    print(f"[WhatsApp] Body length: {len(Body) if Body else 0}")
     
     # Validate input
     if not Body or len(Body.strip()) < 5:
-        print(f"[WhatsApp] Message too short, sending help text")
+        print(f"[WhatsApp] Message too short (len={len(Body.strip()) if Body else 0}), sending help text")
         twiml = """<?xml version="1.0" encoding="UTF-8"?>
         <Response>
             <Message>Please send a claim to fact-check. Example: "Is it true that drinking hot water cures COVID?"</Message>
