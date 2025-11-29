@@ -1252,6 +1252,18 @@ class WhatsAppWebhookRequest(BaseModel):
     MediaUrl0: Optional[str] = None
 
 
+@app.get("/api/webhook/whatsapp", tags=["WhatsApp"])
+async def whatsapp_webhook_verify():
+    """
+    GET endpoint for webhook verification.
+    Twilio may ping this to verify the webhook is reachable.
+    """
+    return Response(
+        content="WhatsApp webhook is active. Use POST to send messages.",
+        media_type="text/plain"
+    )
+
+
 @app.post("/api/webhook/whatsapp", tags=["WhatsApp"])
 async def whatsapp_webhook(
     From: str = "",
@@ -1265,14 +1277,20 @@ async def whatsapp_webhook(
     Receives incoming WhatsApp messages, runs fact-check, and returns TwiML response.
     
     Setup in Twilio Console:
-    1. Go to WhatsApp Sandbox or your WhatsApp number
-    2. Set webhook URL to: https://your-domain/api/webhook/whatsapp
-    3. Method: POST
+    1. Go to Messaging > Try it Out > Send a WhatsApp message
+    2. Click "Sandbox Settings" 
+    3. Set "WHEN A MESSAGE COMES IN" webhook URL to: https://crisiswatch-uoj4.onrender.com/api/webhook/whatsapp
+    4. Method: POST
+    5. Save
     """
     from tools import WhatsAppGatewayTool
     
+    # Log incoming request for debugging
+    print(f"[WhatsApp] Received message from {From}: {Body[:50]}...")
+    
     # Validate input
     if not Body or len(Body.strip()) < 5:
+        print(f"[WhatsApp] Message too short, sending help text")
         twiml = """<?xml version="1.0" encoding="UTF-8"?>
         <Response>
             <Message>Please send a claim to fact-check. Example: "Is it true that drinking hot water cures COVID?"</Message>
@@ -1287,12 +1305,16 @@ async def whatsapp_webhook(
         is_forwarded=gateway._detect_forwarded(Body),
     )
     
+    print(f"[WhatsApp] Processing claim: {message.text[:100]}...")
+    
     # Run fact-check
     try:
         result, proc_time = await run_factcheck_pipeline(
             raw_input=message.text,
             language=message.language,
         )
+        
+        print(f"[WhatsApp] Fact-check complete: {result.verdict.value} ({result.confidence:.0%})")
         
         # Store result
         store = get_claim_store()
@@ -1333,9 +1355,13 @@ _Reply with another claim to check!_"""
             <Message>{response_text}</Message>
         </Response>"""
         
+        print(f"[WhatsApp] Sending response to {From}")
         return Response(content=twiml, media_type="application/xml")
         
     except Exception as e:
+        print(f"[WhatsApp] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
         <Response>
             <Message>Sorry, I couldn't check that claim right now. Please try again later. Error: {str(e)[:100]}</Message>
@@ -1350,11 +1376,14 @@ async def whatsapp_status():
     
     return {
         "enabled": True,
-        "webhook_url": "/api/webhook/whatsapp",
+        "webhook_url": "https://crisiswatch-uoj4.onrender.com/api/webhook/whatsapp",
         "twilio_configured": bool(getattr(settings, 'twilio_account_sid', None)),
         "instructions": {
-            "sandbox": "Send 'join <sandbox-code>' to +1 415 523 8886 to connect",
-            "webhook": "Set POST webhook to https://your-domain/api/webhook/whatsapp in Twilio Console",
+            "step1": "Go to Twilio Console > Messaging > Try it Out > Send a WhatsApp message",
+            "step2": "Click 'Sandbox Settings' in the left menu",
+            "step3": "Set 'WHEN A MESSAGE COMES IN' to: https://crisiswatch-uoj4.onrender.com/api/webhook/whatsapp",
+            "step4": "Set method to POST and Save",
+            "step5": "Send a message to +1 415 523 8886 to test",
         },
     }
 
