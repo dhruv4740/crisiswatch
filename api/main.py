@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Response
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
