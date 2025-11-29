@@ -407,8 +407,9 @@ async def check_claim_stream(
             yield send_event("step", {"step": "extracting", "progress": 10, "message": "Analyzing claim..."})
             claim_obj = await extract_claim({"raw_input": claim})
             extracted_claim = claim_obj.get("claim")
+            error_msg = claim_obj.get("error")
             if not extracted_claim:
-                yield send_event("error", {"message": "Failed to extract claim from input"})
+                yield send_event("error", {"message": f"Failed to extract claim: {error_msg or 'Unknown error'}"})
                 return
             
             # Step 2: Generate search queries

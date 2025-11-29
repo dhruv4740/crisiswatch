@@ -171,8 +171,11 @@ async def extract_claim(state: FactCheckState) -> dict[str, Any]:
                 "error": f"Claim not checkworthy: {parsed.get('reason', 'Not a verifiable factual claim')}",
             }
         
+        # Use extracted claim or fall back to raw input
+        main_claim = parsed.get("main_claim") or raw_input
+        
         claim = Claim(
-            text=parsed.get("main_claim", raw_input),
+            text=main_claim,
             language=language,
             crisis_type=parsed.get("crisis_type"),
             extracted_entities=parsed.get("entities", []),
@@ -181,6 +184,9 @@ async def extract_claim(state: FactCheckState) -> dict[str, Any]:
         return {"claim": claim, "error": None}
         
     except Exception as e:
+        import traceback
+        print(f"[extract_claim] Error: {e}")
+        print(traceback.format_exc())
         # Fallback: use raw input as claim
         return {
             "claim": Claim(text=raw_input, language=language),
