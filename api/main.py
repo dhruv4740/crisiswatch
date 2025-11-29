@@ -10,10 +10,11 @@ from datetime import datetime
 from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from typing import Optional
 
 from config import get_settings
 from models.schemas import (
@@ -876,6 +877,545 @@ async def get_youtube_videos(crisis_type: str = "earthquake", limit: int = 10):
             for v in videos[:limit]
         ],
     }
+
+
+# ============================================
+# URL EXTRACTION & BATCH CHECKING
+# ============================================
+
+class URLCheckRequest(BaseModel):
+    """Request to extract and check claims from a URL."""
+    url: str = Field(..., description="URL of the article to analyze")
+    max_claims: int = Field(default=5, ge=1, le=20, description="Maximum claims to extract and check")
+    language: str = Field(default="en", pattern="^(en|hi)$")
+
+
+class URLCheckResponse(BaseModel):
+    """Response for URL-based claim extraction and checking."""
+    url: str
+    title: str
+    domain: str
+    word_count: int
+    claims_found: int
+    claims_checked: int
+    results: list[ClaimCheckResponse]
+    total_processing_time_seconds: float
+
+
+@app.post("/api/check-url", response_model=URLCheckResponse, tags=["Fact-Check"])
+async def check_url_claims(request: URLCheckRequest):
+    """
+    Extract claims from a URL and fact-check them.
+    
+    1. Fetches article content from the URL
+    2. Identifies checkable factual claims
+    3. Runs fact-check on each claim
+    4. Returns aggregated results
+    """
+    from tools import URLClaimExtractor
+    
+    extractor = URLClaimExtractor()
+    start_time = time.time()
+    
+    # Extract article content
+    article = await extractor.extract_article(request.url)
+    if not article:
+        raise HTTPException(status_code=400, detail="Could not extract content from URL")
+    
+    # Identify claims
+    claims = extractor.identify_claims(article.content, max_claims=request.max_claims * 2)
+    
+    if not claims:
+        return URLCheckResponse(
+            url=request.url,
+            title=article.title,
+            domain=article.domain,
+            word_count=article.word_count,
+            claims_found=0,
+            claims_checked=0,
+            results=[],
+            total_processing_time_seconds=time.time() - start_time,
+        )
+    
+    # Sort by checkworthiness and take top N
+    top_claims = sorted(claims, key=lambda x: x["checkworthiness"], reverse=True)[:request.max_claims]
+    
+    # Check each claim
+    store = get_claim_store()
+    results = []
+    
+    for claim_data in top_claims:
+        claim_text = claim_data["text"]
+        
+        # Check cache first
+        cached = store.get(claim_text)
+        if cached:
+            results.append(ClaimCheckResponse(
+                claim_id=cached["claim_hash"],
+                claim_text=claim_text,
+                verdict=cached["verdict"],
+                confidence=cached["confidence"],
+                severity=cached["severity"],
+                explanation=cached["explanation"],
+                sources_checked=cached.get("sources_checked", 0),
+                evidence=[],
+                overall_reliability=cached.get("overall_reliability", 0.0),
+                source_diversity=cached.get("source_diversity", 0.0),
+                processing_time_seconds=0.0,
+                cached=True,
+            ))
+            continue
+        
+        # Run fact-check
+        try:
+            result, proc_time = await run_factcheck_pipeline(
+                raw_input=claim_text,
+                language=request.language,
+            )
+            claim_id = store.store(claim_text, result)
+            
+            evidence_list = [
+                {
+                    "source": e.source_name,
+                    "type": e.source_type,
+                    "snippet": e.snippet,
+                    "stance": e.stance,
+                    "reliability": e.reliability_score,
+                    "url": e.source_url,
+                    "published_date": e.published_date,
+                }
+                for e in result.evidence
+            ]
+            
+            results.append(ClaimCheckResponse(
+                claim_id=claim_id,
+                claim_text=claim_text,
+                verdict=result.verdict.value,
+                confidence=result.confidence,
+                severity=result.severity.value,
+                explanation=result.explanation,
+                sources_checked=result.sources_checked,
+                evidence=evidence_list,
+                overall_reliability=result.overall_reliability,
+                source_diversity=result.source_diversity,
+                processing_time_seconds=proc_time,
+                cached=False,
+            ))
+        except Exception as e:
+            results.append(ClaimCheckResponse(
+                claim_id="error",
+                claim_text=claim_text,
+                verdict="unverifiable",
+                confidence=0.0,
+                severity="low",
+                explanation=f"Error: {str(e)}",
+                sources_checked=0,
+                evidence=[],
+                overall_reliability=0.0,
+                source_diversity=0.0,
+                processing_time_seconds=0.0,
+                cached=False,
+            ))
+    
+    return URLCheckResponse(
+        url=request.url,
+        title=article.title,
+        domain=article.domain,
+        word_count=article.word_count,
+        claims_found=len(claims),
+        claims_checked=len(results),
+        results=results,
+        total_processing_time_seconds=time.time() - start_time,
+    )
+
+
+# ============================================
+# TRENDING & ANALYTICS
+# ============================================
+
+@app.get("/api/trending", tags=["Analytics"])
+async def get_trending_claims(
+    limit: int = Query(default=20, ge=1, le=100),
+    category: Optional[str] = Query(default=None, description="Filter by crisis type"),
+    hours: int = Query(default=24, ge=1, le=168, description="Look back period in hours"),
+):
+    """
+    Get trending/recently checked claims.
+    
+    Returns claims ordered by recency with category filtering.
+    Used by the frontend Trending Dashboard.
+    """
+    from datetime import datetime, timedelta
+    
+    store = get_claim_store()
+    cutoff_time = datetime.now() - timedelta(hours=hours)
+    
+    with store._lock:
+        items = list(store._cache.values())
+    
+    # Filter by time and category
+    filtered = []
+    for item in items:
+        checked_at = item.get("checked_at", "")
+        if checked_at:
+            try:
+                item_time = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+                if item_time.replace(tzinfo=None) < cutoff_time:
+                    continue
+            except:
+                pass
+        
+        if category and item.get("crisis_type") != category:
+            continue
+        
+        filtered.append(item)
+    
+    # Sort by recency
+    filtered.sort(key=lambda x: x.get("checked_at", ""), reverse=True)
+    
+    # Aggregate stats
+    verdict_counts = {}
+    severity_counts = {}
+    category_counts = {}
+    
+    for item in filtered:
+        v = item.get("verdict", "unknown")
+        s = item.get("severity", "unknown")
+        c = item.get("crisis_type", "other")
+        verdict_counts[v] = verdict_counts.get(v, 0) + 1
+        severity_counts[s] = severity_counts.get(s, 0) + 1
+        category_counts[c] = category_counts.get(c, 0) + 1
+    
+    return {
+        "period_hours": hours,
+        "total_claims": len(filtered),
+        "claims": [
+            {
+                "claim_id": item.get("claim_hash"),
+                "claim_text": item.get("claim_text", "")[:200],
+                "verdict": item.get("verdict"),
+                "confidence": item.get("confidence"),
+                "severity": item.get("severity"),
+                "crisis_type": item.get("crisis_type"),
+                "checked_at": item.get("checked_at"),
+            }
+            for item in filtered[:limit]
+        ],
+        "stats": {
+            "by_verdict": verdict_counts,
+            "by_severity": severity_counts,
+            "by_category": category_counts,
+        },
+    }
+
+
+@app.get("/api/analytics/summary", tags=["Analytics"])
+async def get_analytics_summary():
+    """
+    Get comprehensive analytics summary.
+    
+    Returns:
+    - Total claims checked
+    - Verdict distribution
+    - Severity distribution
+    - Top sources by reliability
+    - Average confidence scores
+    """
+    store = get_claim_store()
+    
+    with store._lock:
+        items = list(store._cache.values())
+    
+    if not items:
+        return {
+            "total_claims": 0,
+            "verdict_distribution": {},
+            "severity_distribution": {},
+            "average_confidence": 0.0,
+            "average_reliability": 0.0,
+            "false_claim_rate": 0.0,
+        }
+    
+    # Calculate stats
+    verdict_counts = {}
+    severity_counts = {}
+    total_confidence = 0.0
+    total_reliability = 0.0
+    false_count = 0
+    
+    for item in items:
+        v = item.get("verdict", "unknown")
+        s = item.get("severity", "unknown")
+        verdict_counts[v] = verdict_counts.get(v, 0) + 1
+        severity_counts[s] = severity_counts.get(s, 0) + 1
+        total_confidence += item.get("confidence", 0.0)
+        total_reliability += item.get("overall_reliability", 0.0)
+        if v in ["false", "mostly_false"]:
+            false_count += 1
+    
+    return {
+        "total_claims": len(items),
+        "verdict_distribution": verdict_counts,
+        "severity_distribution": severity_counts,
+        "average_confidence": round(total_confidence / len(items), 2),
+        "average_reliability": round(total_reliability / len(items), 2),
+        "false_claim_rate": round(false_count / len(items), 2),
+    }
+
+
+# ============================================
+# IMAGE FACT-CHECKING
+# ============================================
+
+class ImageCheckRequest(BaseModel):
+    """Request to check an image."""
+    image_url: str = Field(..., description="URL of the image to check")
+    extract_text: bool = Field(default=True, description="Whether to extract text from image")
+
+
+@app.post("/api/check-image", tags=["Fact-Check"])
+async def check_image(request: ImageCheckRequest):
+    """
+    Analyze an image for manipulation and extract text.
+    
+    Features:
+    - Reverse image search links (TinEye, Google Lens)
+    - Text extraction (OCR) if enabled
+    - Manipulation detection heuristics
+    """
+    from tools import ImageFactCheckTool
+    
+    tool = ImageFactCheckTool()
+    
+    # Get reverse image search links
+    search_links = await tool.reverse_image_search(request.image_url)
+    
+    # Extract text if requested
+    extracted_text = None
+    if request.extract_text:
+        extracted_text = await tool.extract_text_from_image(request.image_url)
+    
+    # Get manipulation analysis
+    manipulation = tool.detect_manipulation_signs({})
+    
+    return {
+        "image_url": request.image_url,
+        "reverse_search_links": search_links,
+        "extracted_text": extracted_text,
+        "manipulation_analysis": manipulation,
+        "recommendations": [
+            "Use the reverse image search links to find original sources",
+            "Check if the image has appeared on fact-checking sites",
+            "Look for visual inconsistencies (shadows, edges, lighting)",
+            "Verify the date the image was first published",
+        ],
+    }
+
+
+# ============================================
+# RELIABILITY LOOKUP
+# ============================================
+
+@app.get("/api/reliability", tags=["Reliability"])
+async def get_source_reliability(url: str = Query(..., description="URL to check reliability")):
+    """
+    Get reliability score for a specific source URL.
+    
+    Returns reliability score (0-1) and source type classification.
+    """
+    score, source_type = get_reliability_score(url=url)
+    
+    return {
+        "url": url,
+        "reliability_score": round(score, 2),
+        "source_type": source_type,
+        "rating": (
+            "high" if score >= 0.8 else
+            "medium" if score >= 0.6 else
+            "low" if score >= 0.4 else
+            "unknown"
+        ),
+    }
+
+
+# ============================================
+# WHATSAPP BOT INTEGRATION
+# ============================================
+
+class WhatsAppWebhookRequest(BaseModel):
+    """Incoming WhatsApp message via Twilio."""
+    From: str = Field(..., description="Sender's phone number")
+    Body: str = Field(..., description="Message text")
+    NumMedia: int = Field(default=0)
+    MediaUrl0: Optional[str] = None
+
+
+@app.post("/api/webhook/whatsapp", tags=["WhatsApp"])
+async def whatsapp_webhook(
+    From: str = "",
+    Body: str = "",
+    NumMedia: int = 0,
+    MediaUrl0: Optional[str] = None,
+):
+    """
+    Twilio WhatsApp webhook endpoint.
+    
+    Receives incoming WhatsApp messages, runs fact-check, and returns TwiML response.
+    
+    Setup in Twilio Console:
+    1. Go to WhatsApp Sandbox or your WhatsApp number
+    2. Set webhook URL to: https://your-domain/api/webhook/whatsapp
+    3. Method: POST
+    """
+    from tools import WhatsAppGatewayTool
+    
+    # Validate input
+    if not Body or len(Body.strip()) < 5:
+        twiml = """<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Message>Please send a claim to fact-check. Example: "Is it true that drinking hot water cures COVID?"</Message>
+        </Response>"""
+        return Response(content=twiml, media_type="application/xml")
+    
+    # Process the message
+    gateway = WhatsAppGatewayTool()
+    message = gateway.receive_message(
+        text=Body.strip(),
+        sender_phone=From,
+        is_forwarded=gateway._detect_forwarded(Body),
+    )
+    
+    # Run fact-check
+    try:
+        result, proc_time = await run_factcheck_pipeline(
+            raw_input=message.text,
+            language=message.language,
+        )
+        
+        # Store result
+        store = get_claim_store()
+        store.store(message.text, result)
+        
+        # Format response for WhatsApp
+        verdict_emoji = {
+            "false": "❌ FALSE",
+            "mostly_false": "⚠️ MOSTLY FALSE",
+            "mixed": "🤔 MIXED",
+            "mostly_true": "✅ MOSTLY TRUE",
+            "true": "✅ TRUE",
+            "unverifiable": "❓ UNVERIFIABLE",
+        }
+        
+        verdict_display = verdict_emoji.get(result.verdict.value, result.verdict.value.upper())
+        
+        response_text = f"""🔍 *Fact Check Result*
+
+*Claim:* {message.text[:100]}{'...' if len(message.text) > 100 else ''}
+
+*Verdict:* {verdict_display}
+*Confidence:* {int(result.confidence * 100)}%
+*Severity:* {result.severity.value.title()}
+
+*Explanation:*
+{result.explanation[:500]}{'...' if len(result.explanation) > 500 else ''}
+
+🔗 Full details: https://crisiswatch-web.vercel.app
+
+_Reply with another claim to check!_"""
+
+        if result.correction:
+            response_text += f"\n\n✍️ *Correction to share:* {result.correction}"
+        
+        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Message>{response_text}</Message>
+        </Response>"""
+        
+        return Response(content=twiml, media_type="application/xml")
+        
+    except Exception as e:
+        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Message>Sorry, I couldn't check that claim right now. Please try again later. Error: {str(e)[:100]}</Message>
+        </Response>"""
+        return Response(content=twiml, media_type="application/xml")
+
+
+@app.get("/api/whatsapp/status", tags=["WhatsApp"])
+async def whatsapp_status():
+    """Check WhatsApp bot configuration status."""
+    settings = get_settings()
+    
+    return {
+        "enabled": True,
+        "webhook_url": "/api/webhook/whatsapp",
+        "twilio_configured": bool(getattr(settings, 'twilio_account_sid', None)),
+        "instructions": {
+            "sandbox": "Send 'join <sandbox-code>' to +1 415 523 8886 to connect",
+            "webhook": "Set POST webhook to https://your-domain/api/webhook/whatsapp in Twilio Console",
+        },
+    }
+
+
+# ============================================
+# VIRAL MISINFORMATION DETECTION
+# ============================================
+
+@app.get("/api/detect-viral", tags=["Trending"])
+async def detect_viral_misinformation(
+    topic: str = Query(..., description="Topic to search for (e.g., 'COVID vaccine', 'election fraud')"),
+    platforms: str = Query(default="twitter,reddit,facebook", description="Comma-separated platforms to search"),
+):
+    """
+    Use Gemini to search for viral misinformation on social media.
+    
+    This uses Gemini's knowledge to identify trending false claims about a topic.
+    """
+    from agents.llm_providers import LLMManager
+    
+    llm = LLMManager()
+    
+    if not llm.gemini.is_available:
+        raise HTTPException(status_code=503, detail="Gemini not configured")
+    
+    # Convert platforms to sites
+    platform_sites = {
+        "twitter": "twitter.com",
+        "x": "x.com", 
+        "reddit": "reddit.com",
+        "facebook": "facebook.com",
+        "youtube": "youtube.com",
+        "tiktok": "tiktok.com",
+    }
+    
+    sites = []
+    for p in platforms.split(","):
+        p = p.strip().lower()
+        if p in platform_sites:
+            sites.append(platform_sites[p])
+    
+    try:
+        result = await llm.gemini.search_with_grounding(
+            query=f"viral misinformation false claims {topic}",
+            sites=sites if sites else None,
+        )
+        
+        return {
+            "topic": topic,
+            "platforms_searched": platforms.split(","),
+            "trending_claims": result.get("trending_claims", []),
+            "fact_checks_found": result.get("fact_checks_found", []),
+            "summary": result.get("summary", ""),
+            "error": result.get("error"),
+        }
+        
+    except Exception as e:
+        return {
+            "topic": topic,
+            "error": str(e),
+            "trending_claims": [],
+            "fact_checks_found": [],
+        }
 
 
 # ============================================

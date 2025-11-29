@@ -39,6 +39,7 @@ class GeminiProvider(BaseLLMProvider):
     def __init__(self):
         self.settings = get_settings()
         self._client = None
+        self._grounded_client = None
     
     @property
     def is_available(self) -> bool:
@@ -79,6 +80,78 @@ class GeminiProvider(BaseLLMProvider):
             return response.text
         except Exception as e:
             raise RuntimeError(f"Gemini generation error: {e}")
+    
+    async def search_with_grounding(
+        self,
+        query: str,
+        sites: Optional[list[str]] = None,
+    ) -> dict:
+        """
+        Use Gemini with Google Search grounding to find current information.
+        
+        Args:
+            query: Search query
+            sites: Optional list of sites to focus on (e.g., ["twitter.com", "reddit.com"])
+            
+        Returns:
+            dict with search results and summary
+        """
+        if not self.is_available:
+            raise ValueError("Gemini API key not configured")
+        
+        import google.generativeai as genai
+        
+        # Format site restrictions into query
+        if sites:
+            site_query = " OR ".join([f"site:{site}" for site in sites])
+            full_query = f"({query}) ({site_query})"
+        else:
+            full_query = query
+        
+        prompt = f"""Search the web for recent information about: {full_query}
+
+Focus on finding:
+1. Viral claims or misinformation spreading on social media
+2. Fact-checks that have been done on this topic
+3. Official statements or debunking efforts
+
+Return your findings in JSON format:
+{{
+    "trending_claims": [
+        {{"claim": "text of claim", "source": "where found", "virality": "high/medium/low", "likely_false": true/false}}
+    ],
+    "fact_checks_found": [
+        {{"title": "fact-check title", "verdict": "verdict", "source": "fact-checker name"}}
+    ],
+    "summary": "Brief summary of the current situation"
+}}"""
+
+        try:
+            # Use Gemini with grounding
+            client = self._get_client()
+            response = await client.generate_content_async(
+                prompt,
+                generation_config={
+                    "temperature": 0.3,
+                    "max_output_tokens": 2048,
+                }
+            )
+            
+            # Parse response
+            import json
+            text = response.text.strip()
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return {"summary": text, "trending_claims": [], "fact_checks_found": []}
+            
+        except Exception as e:
+            return {"error": str(e), "trending_claims": [], "fact_checks_found": []}
 
 
 class LLMManager:

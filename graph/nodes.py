@@ -13,10 +13,12 @@ from graph.prompts import (
     EXPLANATION_GENERATION_PROMPT_EN,
     EXPLANATION_GENERATION_PROMPT_HI,
     SEARCH_QUERY_GENERATION_PROMPT,
+    MISINFO_PATTERNS,
 )
 from models.schemas import Claim, Evidence, SearchResult, VerdictType, SeverityLevel
 from agents.llm_providers import LLMManager
 from tools import TavilySearchTool, GoogleFactCheckTool, NewsAPITool, WikipediaTool
+from tools import AggregatedFactCheckTool  # New: Snopes, PolitiFact, etc.
 from services.reliability import get_reliability_score, calculate_source_diversity
 from services.confidence import calibrate_confidence
 
@@ -28,6 +30,12 @@ SOURCE_DISPLAY_NAMES = {
     "factcheck": "Google Fact Check",
     "news": "NewsAPI",
     "wikipedia": "Wikipedia",
+    "factcheck_aggregator": "Fact-Checkers",
+    "snopes": "Snopes",
+    "politifact": "PolitiFact",
+    "fullfact": "Full Fact",
+    "afp_factcheck": "AFP Fact Check",
+    "reuters_factcheck": "Reuters",
 }
 
 
@@ -37,6 +45,7 @@ tavily_tool = TavilySearchTool()
 factcheck_tool = GoogleFactCheckTool()
 news_tool = NewsAPITool()
 wikipedia_tool = WikipediaTool()
+aggregated_factcheck_tool = AggregatedFactCheckTool()  # New!
 
 
 def _extract_domain(url: str) -> str:
@@ -260,6 +269,10 @@ async def search_sources(state: FactCheckState) -> dict[str, Any]:
         tasks.append(("factcheck", factcheck_tool.search(primary_query, language_code=language, max_results=10)))
         sources_checked += 1
     
+    # NEW: Aggregated fact-checkers (Snopes, PolitiFact, Full Fact, AFP, Reuters)
+    tasks.append(("factcheck_aggregator", aggregated_factcheck_tool.search(primary_query, max_results_per_source=2)))
+    sources_checked += 5  # Count all 5 fact-checkers
+    
     # NewsAPI - increased to 5 articles
     if news_tool.is_available:
         tasks.append(("news", news_tool.search(primary_query, language=language, max_results=5, sort_by="relevancy")))
@@ -331,6 +344,9 @@ async def search_sources_streaming(
     
     if factcheck_tool.is_available:
         sources.append(("factcheck", lambda: factcheck_tool.search(primary_query, language_code=language, max_results=10)))
+    
+    # NEW: Aggregated fact-checkers
+    sources.append(("factcheck_aggregator", lambda: aggregated_factcheck_tool.search(primary_query, max_results_per_source=2)))
     
     if news_tool.is_available:
         sources.append(("news", lambda: news_tool.search(primary_query, language=language, max_results=5, sort_by="relevancy")))
@@ -423,6 +439,7 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
             evidence=evidence_text,
             source_count=len(top_results),
             diversity_score=source_diversity,
+            misinfo_patterns=MISINFO_PATTERNS,
         )
         
         response = await llm_manager.generate(

@@ -2,6 +2,59 @@
 Prompts for CrisisWatch agents.
 """
 
+# ============================================
+# MISINFORMATION PATTERNS DATABASE
+# ============================================
+MISINFO_PATTERNS = """
+=== KNOWN MISINFORMATION TACTICS & PATTERNS ===
+
+**DARVO (Deny, Attack, Reverse Victim and Offender)**
+- Denying wrongdoing, attacking the accuser, claiming to be the real victim
+- Often used by those spreading misinformation when called out
+
+**Gish Gallop**
+- Overwhelming with numerous weak arguments
+- Claims that cite "hundreds of studies" without specifics
+- Multiple unrelated claims in one message
+
+**Appeal to False Authority**
+- "Doctors say..." without naming specific credible doctors
+- Anonymous "experts" or "scientists"
+- Misrepresenting credentials
+
+**Cherry Picking**
+- Selecting only data that supports the claim
+- Ignoring contradicting evidence
+- Outdated studies when newer data exists
+
+**False Equivalence**
+- Treating fringe theories equal to scientific consensus
+- "Just asking questions" about settled science
+- "Both sides" when there's clear evidence
+
+**Emotional Manipulation**
+- Fear-mongering ("they don't want you to know")
+- Urgency ("share before it's deleted")
+- Conspiracy framing ("the truth they're hiding")
+
+**Common Misinformation Categories:**
+1. HEALTH: Anti-vaccine, fake cures, 5G fears, pandemic conspiracies
+2. DISASTERS: Exaggerated death tolls, fake rescue scams, weather control claims
+3. POLITICAL: Election fraud without evidence, fabricated quotes, doctored media
+4. FINANCIAL: Get-rich-quick schemes, crypto pump-and-dumps, fake celebrity endorsements
+5. SCIENCE: Climate denial, flat earth, evolution denial, moon landing hoax
+
+**Red Flag Phrases:**
+- "What THEY don't want you to know"
+- "Exposed!" / "Exposed by whistleblower"
+- "100% proven" / "Guaranteed"
+- "Before it gets deleted/banned"
+- "Mainstream media won't report this"
+- "Do your own research" (when dismissing evidence)
+- "Miracle cure" / "One weird trick"
+- "Wake up sheeple"
+"""
+
 CLAIM_EXTRACTION_PROMPT = """You are an expert at analyzing text to identify factual claims that can be verified.
 
 Given the following text, extract the main factual claim(s) that should be fact-checked. Focus on claims that:
@@ -39,11 +92,7 @@ SOURCE DIVERSITY SCORE: {diversity_score:.0%}
 3. Note any conflicting reports and which sources are more credible
 4. Consider source diversity - claims verified across diverse sources are more reliable
 
-=== KNOWN MISINFORMATION PATTERNS ===
-Be ASSERTIVE when claims match well-documented misinformation:
-- Medical: Anti-vaccine claims, fake cures (bleach, ivermectin for COVID), 5G health fears
-- Disasters: Exaggerated death tolls, fake rescue scams, false government conspiracy claims
-- If a claim contradicts scientific consensus from WHO, CDC, or peer-reviewed research, rate as FALSE with HIGH confidence (0.85+)
+{misinfo_patterns}
 
 === CONFIDENCE CALIBRATION GUIDE ===
 Set confidence based on these criteria:
@@ -70,7 +119,9 @@ Respond in JSON format:
         {{"source": "source name", "finding": "what this source says", "stance": "supports|refutes|neutral", "reliability": "high|medium|low"}}
     ],
     "source_agreement": "strong_consensus|majority_agree|mixed|conflicting|insufficient",
-    "reasoning": "Detailed explanation of how you reached this verdict, referencing specific sources and their reliability"
+    "reasoning": "Detailed explanation of how you reached this verdict, referencing specific sources and their reliability",
+    "detected_tactics": ["list any misinformation tactics detected, if any"],
+    "why_false_explanation": "If verdict is false/mostly_false, explain WHY the claim is false and what manipulation tactics were used"
 }}
 """
 

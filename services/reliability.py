@@ -148,6 +148,12 @@ class SourceReliabilityScorer:
     # Base scores by source type (tool origin)
     BASE_SCORES = {
         "google_factcheck": 0.90,  # Already from fact-check orgs
+        "snopes": 0.92,            # IFCN-certified fact-checker
+        "politifact": 0.92,        # Pulitzer Prize winning
+        "fullfact": 0.90,          # UK IFCN-certified
+        "afp_factcheck": 0.90,     # Major wire service
+        "reuters_factcheck": 0.90, # Trusted news agency
+        "factcheck_aggregator": 0.90,  # Aggregated fact-checks
         "newsapi": 0.70,           # Varies by outlet
         "tavily": 0.60,            # Web search, mixed quality
         "wikipedia": 0.75,         # Generally reliable but can be edited
