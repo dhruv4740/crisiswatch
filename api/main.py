@@ -366,6 +366,7 @@ async def check_claim(request: ClaimCheckRequest):
 async def check_claim_stream(
     claim: str = Query(..., min_length=5, max_length=2000, description="The claim text to verify"),
     language: str = Query(default="en", pattern="^(en|hi)$", description="Language code (en or hi)"),
+    skip_cache: bool = Query(default=False, description="Skip cache lookup and force fresh check"),
 ):
     """
     Check a claim with real-time progress streaming via Server-Sent Events (SSE).
