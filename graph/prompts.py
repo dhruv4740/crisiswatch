@@ -173,12 +173,12 @@ Respond in JSON format:
     "confidence": 0.0-1.0,
     "severity": "critical|high|medium|low",
     "key_findings": [
-        {{"source": "source name", "finding": "what this source says", "stance": "supports|refutes|neutral", "reliability": "high|medium|low"}}
+        {{"source": "source name", "finding": "what this source says INCLUDING ANY SPECIFIC DATES/TIMES mentioned", "stance": "supports|refutes|neutral", "reliability": "high|medium|low", "event_date": "specific date of the event if mentioned, or null"}}
     ],
     "source_agreement": "strong_consensus|majority_agree|mixed|conflicting|insufficient",
-    "reasoning": "Detailed explanation of how you reached this verdict, referencing specific sources and their reliability",
+    "reasoning": "Detailed explanation WITH SPECIFIC DATES. If sources mention when events occurred, include those dates. Example: 'BBC reported this blast occurred on November 25, 2025 at 18:52 local time, not 30 minutes ago.'",
     "detected_tactics": ["list any misinformation tactics detected, if any"],
-    "why_false_explanation": "If verdict is false/mostly_false, explain WHY the claim is false and what manipulation tactics were used"
+    "why_false_explanation": "If verdict is false/mostly_false, explain WHY with specific dates if timing is the issue"
 }}
 """
 
@@ -200,15 +200,20 @@ REASONING: {reasoning}
 Generate an explanation that:
 1. Is easy to understand for non-experts
 2. Clearly states what is true/false
-3. **If claim is about current events**: State clearly "As of {current_date}, there is no..." or confirm what IS currently happening
+3. **ALWAYS include specific dates**: 
+   - For current event claims: "As of {current_date}, there is no..." 
+   - For past events being misrepresented as current: "This refers to an event that occurred on [SPECIFIC DATE], not recently"
+   - If a source mentions a date/time, INCLUDE IT in the explanation
 4. Provides actionable information if relevant (e.g., what people should do instead)
-5. Cites reliable sources with their dates when relevant
+5. Cites reliable sources WITH THEIR PUBLICATION DATES when available
 6. Is appropriate for crisis situations (calming but informative)
+
+**IMPORTANT**: Never say vague things like "happened in 2025" - always give the specific date if available (e.g., "happened on November 15, 2025" or "happened last Monday, November 25, 2025").
 
 Respond in JSON format:
 {{
-    "explanation": "Clear explanation in English (2-3 paragraphs). For current event claims, explicitly mention the date and that no recent evidence confirms the claim.",
-    "correction": "A short, shareable correction message (1-2 sentences) suitable for social media"
+    "explanation": "Clear explanation in English (2-3 paragraphs). MUST include specific dates when discussing events.",
+    "correction": "A short, shareable correction message (1-2 sentences) suitable for social media - include date if relevant"
 }}
 """
 
@@ -230,15 +235,20 @@ EXPLANATION_GENERATION_PROMPT_HI = """आप एक संकट संचार
 ऐसी व्याख्या उत्पन्न करें जो:
 1. गैर-विशेषज्ञों के लिए समझने में आसान हो
 2. स्पष्ट रूप से बताए कि क्या सच है/झूठ है
-3. **वर्तमान घटनाओं के दावों के लिए**: स्पष्ट रूप से बताएं "आज {current_date} तक, कोई..." या पुष्टि करें कि वर्तमान में क्या हो रहा है
+3. **हमेशा विशिष्ट तारीखें शामिल करें**:
+   - वर्तमान घटनाओं के दावों के लिए: "आज {current_date} तक, कोई..."
+   - पुरानी घटनाओं को वर्तमान के रूप में प्रस्तुत करने पर: "यह घटना [विशिष्ट तारीख] को हुई थी, हाल ही में नहीं"
+   - यदि स्रोत में तारीख/समय का उल्लेख है, तो उसे व्याख्या में शामिल करें
 4. यदि प्रासंगिक हो तो कार्रवाई योग्य जानकारी प्रदान करे
-5. विश्वसनीय स्रोतों का हवाला दे
+5. विश्वसनीय स्रोतों का हवाला उनकी प्रकाशन तारीखों के साथ दें
 6. संकट स्थितियों के लिए उपयुक्त हो (शांत करने वाली लेकिन सूचनात्मक)
+
+**महत्वपूर्ण**: कभी भी "2025 में हुआ" जैसी अस्पष्ट बातें न कहें - हमेशा विशिष्ट तारीख दें (जैसे "15 नवंबर, 2025 को हुआ")।
 
 JSON format में जवाब दें:
 {{
-    "explanation_hindi": "हिंदी में स्पष्ट व्याख्या (2-3 पैराग्राफ)। वर्तमान घटना के दावों के लिए, स्पष्ट रूप से तारीख का उल्लेख करें।",
-    "correction_hindi": "सोशल मीडिया के लिए उपयुक्त एक छोटा, साझा करने योग्य सुधार संदेश (1-2 वाक्य)"
+    "explanation_hindi": "हिंदी में स्पष्ट व्याख्या (2-3 पैराग्राफ)। घटनाओं की चर्चा करते समय विशिष्ट तारीखें अवश्य शामिल करें।",
+    "correction_hindi": "सोशल मीडिया के लिए उपयुक्त एक छोटा, साझा करने योग्य सुधार संदेश (1-2 वाक्य) - यदि प्रासंगिक हो तो तारीख शामिल करें"
 }}
 """
 
