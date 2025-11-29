@@ -119,6 +119,19 @@ SOURCE DIVERSITY SCORE: {diversity_score:.0%}
 
 {misinfo_patterns}
 
+=== VERDICT DECISION RULES ===
+**BE DECISIVE - Use definitive verdicts when evidence is clear:**
+
+- **"false"**: Use when evidence CLEARLY refutes the claim. Don't hedge with "mostly_false" if you're confident the claim is wrong.
+- **"mostly_false"**: ONLY use when the claim has a small kernel of truth but is misleading overall.
+- **"mixed"**: ONLY use when evidence genuinely conflicts (some reliable sources say true, others say false).
+- **"mostly_true"**: ONLY use when the claim is substantially correct but has minor inaccuracies.
+- **"true"**: Use when evidence CLEARLY supports the claim. Don't hedge with "mostly_true" if you're confident.
+- **"unverifiable"**: ONLY use when no relevant evidence can be found.
+
+**IMPORTANT:** If confidence >= 80%, you should almost always use "true" or "false", not "mostly" variants.
+The "mostly" verdicts are for genuinely nuanced situations, NOT for hedging when you're actually confident.
+
 === CONFIDENCE CALIBRATION GUIDE ===
 Set confidence based on these criteria:
 

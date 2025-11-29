@@ -20,7 +20,7 @@ from agents.llm_providers import LLMManager
 from tools import TavilySearchTool, GoogleFactCheckTool, NewsAPITool, WikipediaTool
 from tools import AggregatedFactCheckTool  # New: Snopes, PolitiFact, etc.
 from services.reliability import get_reliability_score, calculate_source_diversity
-from services.confidence import calibrate_confidence
+from services.confidence import calibrate_confidence, calibrate_verdict
 
 
 # Source display names for SSE events
@@ -556,6 +556,9 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
             claim_text=claim.text,  # Pass claim text (string) for pseudoscience pattern detection
         )
         
+        # Calibrate verdict based on confidence (upgrade mostly_X to X if confidence is high)
+        calibrated_verdict, verdict_reason = calibrate_verdict(verdict, calibrated_confidence)
+        
         # Calculate overall reliability score (average of evidence)
         overall_reliability = 0.0
         if evidence_list:
@@ -563,12 +566,12 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
         
         return {
             "evidence": evidence_list,
-            "verdict": verdict,
+            "verdict": calibrated_verdict,
             "confidence": calibrated_confidence,
             "severity": severity,
             "source_diversity": source_diversity,
             "overall_reliability": overall_reliability,
-            "_reasoning": parsed.get("reasoning", "") + f" [Calibration: {calibration_reason}]",
+            "_reasoning": parsed.get("reasoning", "") + f" [Calibration: {calibration_reason}] [Verdict: {verdict_reason}]",
         }
         
     except Exception as e:

@@ -175,3 +175,33 @@ def calibrate_confidence(
     """
     calibrator = ConfidenceCalibrator()
     return calibrator.calibrate(base_confidence, verdict, evidence, claim_text=claim_text)
+
+
+def calibrate_verdict(
+    verdict: VerdictType,
+    confidence: float,
+) -> tuple[VerdictType, str]:
+    """
+    Upgrade verdicts when confidence is high enough.
+    
+    Logic:
+    - If confidence >= 85% and verdict is mostly_false → upgrade to false
+    - If confidence >= 85% and verdict is mostly_true → upgrade to true
+    - Mixed stays mixed regardless of confidence (conflicting evidence)
+    
+    Args:
+        verdict: Original verdict from LLM
+        confidence: Calibrated confidence score
+        
+    Returns:
+        Tuple of (calibrated_verdict, reasoning)
+    """
+    UPGRADE_THRESHOLD = 0.85
+    
+    if confidence >= UPGRADE_THRESHOLD:
+        if verdict == VerdictType.MOSTLY_FALSE:
+            return VerdictType.FALSE, f"Upgraded from mostly_false to false (confidence {confidence:.0%} >= 85%)"
+        elif verdict == VerdictType.MOSTLY_TRUE:
+            return VerdictType.TRUE, f"Upgraded from mostly_true to true (confidence {confidence:.0%} >= 85%)"
+    
+    return verdict, "No verdict upgrade needed"
