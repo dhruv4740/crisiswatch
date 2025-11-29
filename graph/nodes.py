@@ -577,6 +577,46 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
         if evidence_list:
             overall_reliability = sum(e.reliability_score for e in evidence_list) / len(evidence_list)
         
+        # Parse side-by-side comparison
+        side_by_side_data = parsed.get("side_by_side", {})
+        side_by_side = None
+        if side_by_side_data:
+            from models.schemas import SideBySideComparison
+            side_by_side = SideBySideComparison(
+                claim_points=side_by_side_data.get("claim_points", []),
+                fact_points=side_by_side_data.get("fact_points", []),
+                discrepancies=side_by_side_data.get("discrepancies", []),
+            )
+        
+        # Parse misinformation analysis
+        misinfo_data = parsed.get("misinformation_analysis", {})
+        misinformation_analysis = None
+        if misinfo_data and calibrated_verdict in [VerdictType.FALSE, VerdictType.MOSTLY_FALSE]:
+            from models.schemas import MisinformationAnalysis, MisinformationTactic, MISINFORMATION_TACTICS
+            tactics = []
+            for tactic_name in misinfo_data.get("tactics_used", []):
+                tactic_key = tactic_name.lower().replace(" ", "_").replace("-", "_")
+                if tactic_key in MISINFORMATION_TACTICS:
+                    tactic_info = MISINFORMATION_TACTICS[tactic_key]
+                    tactics.append(MisinformationTactic(
+                        name=tactic_info["name"],
+                        description=tactic_info["description"],
+                        detected_example=f"Detected in this claim"
+                    ))
+                else:
+                    tactics.append(MisinformationTactic(
+                        name=tactic_name.replace("_", " ").title(),
+                        description=f"This claim uses {tactic_name}",
+                        detected_example=f"Detected in this claim"
+                    ))
+            
+            misinformation_analysis = MisinformationAnalysis(
+                primary_issue=misinfo_data.get("primary_issue", ""),
+                tactics_detected=tactics,
+                context_missing=misinfo_data.get("context_missing", []),
+                manipulation_techniques=misinfo_data.get("manipulation_techniques", []),
+            )
+        
         return {
             "evidence": evidence_list,
             "verdict": calibrated_verdict,
@@ -584,6 +624,8 @@ async def synthesize_evidence(state: FactCheckState) -> dict[str, Any]:
             "severity": severity,
             "source_diversity": source_diversity,
             "overall_reliability": overall_reliability,
+            "side_by_side": side_by_side,
+            "misinformation_analysis": misinformation_analysis,
             "_reasoning": parsed.get("reasoning", "") + f" [Calibration: {calibration_reason}] [Verdict: {verdict_reason}]",
         }
         

@@ -191,6 +191,8 @@ async def run_factcheck_pipeline(
         sources_checked=state.get("sources_checked", 0),
         overall_reliability=state.get("overall_reliability", 0.0),
         source_diversity=state.get("source_diversity", 0.0),
+        side_by_side=state.get("side_by_side"),
+        misinformation_analysis=state.get("misinformation_analysis"),
         processing_time_seconds=processing_time,
     )
     
@@ -1240,6 +1242,19 @@ async def get_source_reliability(url: str = Query(..., description="URL to check
     }
 
 
+@app.get("/api/source-credibility", tags=["Reliability"])
+async def get_credibility(url: str = Query(..., description="URL to check credibility")):
+    """
+    Get detailed credibility information for a source URL.
+    
+    Returns comprehensive credibility analysis including tier, score, and descriptions.
+    """
+    from services.reliability import get_source_credibility
+    
+    credibility = get_source_credibility(url)
+    return credibility
+
+
 # ============================================
 # WHATSAPP BOT INTEGRATION
 # ============================================
@@ -1279,6 +1294,8 @@ async def whatsapp_webhook(request: Request):
     5. Save
     """
     from tools import WhatsAppGatewayTool
+    import httpx
+    import base64
     
     # Parse form data (Twilio sends as application/x-www-form-urlencoded)
     form_data = await request.form()
@@ -1286,27 +1303,261 @@ async def whatsapp_webhook(request: Request):
     Body = form_data.get("Body", "")
     NumMedia = int(form_data.get("NumMedia", 0))
     MediaUrl0 = form_data.get("MediaUrl0")
+    MediaContentType0 = form_data.get("MediaContentType0", "")
     
     # Log incoming request for debugging
     print(f"[WhatsApp] Received from {From}: '{Body}'")
-    print(f"[WhatsApp] Form data keys: {list(form_data.keys())}")
-    print(f"[WhatsApp] Body length: {len(Body) if Body else 0}")
+    print(f"[WhatsApp] NumMedia: {NumMedia}, MediaUrl: {MediaUrl0}, ContentType: {MediaContentType0}")
+    print(f"[WhatsApp] All form data: {dict(form_data)}")
     
-    # Validate input
-    if not Body or len(Body.strip()) < 5:
-        print(f"[WhatsApp] Message too short (len={len(Body.strip()) if Body else 0}), sending help text")
+    claim_text = Body.strip() if Body else ""
+    
+    # Determine media type - check content type first, then guess from URL
+    is_image = False
+    is_audio = False
+    
+    if MediaContentType0:
+        is_image = MediaContentType0.startswith("image/")
+        is_audio = MediaContentType0.startswith("audio/") or "ogg" in MediaContentType0
+    elif MediaUrl0:
+        # Fallback: guess from URL if content type not provided
+        url_lower = MediaUrl0.lower()
+        is_image = any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])
+        is_audio = any(ext in url_lower for ext in ['.ogg', '.mp3', '.wav', '.m4a', '.opus'])
+        # WhatsApp voice notes are typically ogg
+        if 'whatsapp' in url_lower and not is_image:
+            # Default to trying as audio for voice notes
+            is_audio = True
+    
+    print(f"[WhatsApp] Detected: is_image={is_image}, is_audio={is_audio}")
+    
+    # Handle image messages - extract text using OCR
+    if NumMedia > 0 and MediaUrl0 and is_image:
+        print(f"[WhatsApp] Processing image: {MediaUrl0} (type: {MediaContentType0})")
+        try:
+            # Download the image from Twilio
+            async with httpx.AsyncClient() as client:
+                # Twilio requires auth to fetch media
+                settings = get_settings()
+                twilio_sid = getattr(settings, 'twilio_account_sid', '')
+                twilio_token = getattr(settings, 'twilio_auth_token', '')
+                
+                print(f"[WhatsApp] Twilio auth configured: {bool(twilio_sid and twilio_token)}")
+                
+                if twilio_sid and twilio_token:
+                    auth = (twilio_sid, twilio_token)
+                    img_response = await client.get(MediaUrl0, auth=auth, timeout=30, follow_redirects=True)
+                else:
+                    img_response = await client.get(MediaUrl0, timeout=30, follow_redirects=True)
+                
+                print(f"[WhatsApp] Image download status: {img_response.status_code}")
+                
+                if img_response.status_code == 200:
+                    image_data = base64.b64encode(img_response.content).decode('utf-8')
+                    print(f"[WhatsApp] Image size: {len(img_response.content)} bytes")
+                    
+                    # Use Gemini to extract text from image
+                    from agents.llm_providers import LLMManager
+                    llm = LLMManager()
+                    
+                    if llm.gemini.is_available:
+                        import google.generativeai as genai
+                        model = genai.GenerativeModel('gemini-2.0-flash')
+                        
+                        # Determine mime type
+                        mime_type = MediaContentType0 or "image/jpeg"
+                        
+                        response = model.generate_content([
+                            "Extract ALL text from this image. If it's a screenshot of a message, social media post, or news article, extract the main claim or statement. Return ONLY the extracted text, nothing else.",
+                            {"mime_type": mime_type, "data": image_data}
+                        ])
+                        
+                        extracted_text = response.text.strip()
+                        print(f"[WhatsApp] OCR extracted: '{extracted_text[:200]}...'")
+                        
+                        if extracted_text and len(extracted_text) > 5:
+                            claim_text = extracted_text
+                        else:
+                            twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>I couldn't extract text from that image. Please send a clearer screenshot or type the claim directly.</Message>
+</Response>"""
+                            return Response(content=twiml, media_type="application/xml")
+                    else:
+                        print("[WhatsApp] Gemini not available for OCR")
+                        twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Image processing is temporarily unavailable. Please type the claim directly.</Message>
+</Response>"""
+                        return Response(content=twiml, media_type="application/xml")
+                else:
+                    print(f"[WhatsApp] Failed to download image: {img_response.status_code}")
+                    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Could not download image (status {img_response.status_code}). Please type the claim directly.</Message>
+</Response>"""
+                    return Response(content=twiml, media_type="application/xml")
+        except Exception as e:
+            print(f"[WhatsApp] OCR Error: {e}")
+            import traceback
+            traceback.print_exc()
+            twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Error processing image: {str(e)[:100]}. Please type the claim directly.</Message>
+</Response>"""
+            return Response(content=twiml, media_type="application/xml")
+    
+    # Handle audio/voice messages - transcribe using Gemini
+    elif NumMedia > 0 and MediaUrl0 and is_audio:
+        print(f"[WhatsApp] Processing audio: {MediaUrl0} (type: {MediaContentType0})")
+        try:
+            async with httpx.AsyncClient() as client:
+                settings = get_settings()
+                twilio_sid = getattr(settings, 'twilio_account_sid', '')
+                twilio_token = getattr(settings, 'twilio_auth_token', '')
+                
+                print(f"[WhatsApp] Twilio auth configured: {bool(twilio_sid and twilio_token)}")
+                
+                if twilio_sid and twilio_token:
+                    auth = (twilio_sid, twilio_token)
+                    audio_response = await client.get(MediaUrl0, auth=auth, timeout=30, follow_redirects=True)
+                else:
+                    audio_response = await client.get(MediaUrl0, timeout=30, follow_redirects=True)
+                
+                print(f"[WhatsApp] Audio download status: {audio_response.status_code}")
+                
+                if audio_response.status_code == 200:
+                    audio_data = base64.b64encode(audio_response.content).decode('utf-8')
+                    print(f"[WhatsApp] Audio size: {len(audio_response.content)} bytes")
+                    
+                    from agents.llm_providers import LLMManager
+                    llm = LLMManager()
+                    
+                    if llm.gemini.is_available:
+                        import google.generativeai as genai
+                        model = genai.GenerativeModel('gemini-2.0-flash')
+                        
+                        response = model.generate_content([
+                            "Transcribe this audio message. Extract the main claim or statement being made. Return ONLY the transcribed text.",
+                            {"mime_type": MediaContentType0, "data": audio_data}
+                        ])
+                        
+                        transcribed_text = response.text.strip()
+                        print(f"[WhatsApp] Transcribed: '{transcribed_text[:200]}...'")
+                        
+                        if transcribed_text and len(transcribed_text) > 5:
+                            claim_text = transcribed_text
+                        else:
+                            twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>I couldn't transcribe that voice message. Please speak clearly or type the claim.</Message>
+</Response>"""
+                            return Response(content=twiml, media_type="application/xml")
+                    else:
+                        print("[WhatsApp] Gemini not available for transcription")
+                        twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Voice transcription is temporarily unavailable. Please type the claim directly.</Message>
+</Response>"""
+                        return Response(content=twiml, media_type="application/xml")
+                else:
+                    print(f"[WhatsApp] Failed to download audio: {audio_response.status_code}")
+                    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Could not download voice message (status {audio_response.status_code}). Please type the claim.</Message>
+</Response>"""
+                    return Response(content=twiml, media_type="application/xml")
+        except Exception as e:
+            print(f"[WhatsApp] Transcription Error: {e}")
+            import traceback
+            traceback.print_exc()
+            twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Error processing voice message: {str(e)[:100]}. Please type the claim.</Message>
+</Response>"""
+            return Response(content=twiml, media_type="application/xml")
+    
+    # Handle unknown media types - try as image first (most common for fact-checking)
+    elif NumMedia > 0 and MediaUrl0:
+        print(f"[WhatsApp] Unknown media type '{MediaContentType0}', attempting as image...")
+        try:
+            async with httpx.AsyncClient() as client:
+                settings = get_settings()
+                twilio_sid = getattr(settings, 'twilio_account_sid', '')
+                twilio_token = getattr(settings, 'twilio_auth_token', '')
+                
+                if twilio_sid and twilio_token:
+                    auth = (twilio_sid, twilio_token)
+                    media_response = await client.get(MediaUrl0, auth=auth, timeout=30, follow_redirects=True)
+                else:
+                    media_response = await client.get(MediaUrl0, timeout=30, follow_redirects=True)
+                
+                if media_response.status_code == 200:
+                    # Try to detect content type from response headers
+                    actual_content_type = media_response.headers.get('content-type', '')
+                    print(f"[WhatsApp] Actual content type from response: {actual_content_type}")
+                    
+                    media_data = base64.b64encode(media_response.content).decode('utf-8')
+                    
+                    from agents.llm_providers import LLMManager
+                    llm = LLMManager()
+                    
+                    if llm.gemini.is_available:
+                        import google.generativeai as genai
+                        model = genai.GenerativeModel('gemini-2.0-flash')
+                        
+                        # Try as image first
+                        mime_type = actual_content_type or MediaContentType0 or "image/jpeg"
+                        
+                        try:
+                            response = model.generate_content([
+                                "Extract ALL text from this image. If it's a screenshot of a message, social media post, or news article, extract the main claim or statement. Return ONLY the extracted text, nothing else.",
+                                {"mime_type": mime_type, "data": media_data}
+                            ])
+                            
+                            extracted_text = response.text.strip()
+                            print(f"[WhatsApp] Extracted from unknown media: '{extracted_text[:200]}...'")
+                            
+                            if extracted_text and len(extracted_text) > 5:
+                                claim_text = extracted_text
+                            else:
+                                twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>I couldn't extract text from that file. Please send a clearer image or type the claim directly.</Message>
+</Response>"""
+                                return Response(content=twiml, media_type="application/xml")
+                        except Exception as inner_e:
+                            print(f"[WhatsApp] Failed to process as image: {inner_e}")
+                            twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Could not process this media. Please send a screenshot or type your claim. Error: {str(inner_e)[:50]}</Message>
+</Response>"""
+                            return Response(content=twiml, media_type="application/xml")
+        except Exception as e:
+            print(f"[WhatsApp] Media processing error: {e}")
+            twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+<Message>Error processing media: {str(e)[:100]}. Please type your claim directly.</Message>
+</Response>"""
+            return Response(content=twiml, media_type="application/xml")
+    
+    # Validate we have text to check
+    if not claim_text or len(claim_text) < 5:
+        print(f"[WhatsApp] No valid claim text")
         twiml = """<?xml version="1.0" encoding="UTF-8"?>
         <Response>
-            <Message>Please send a claim to fact-check. Example: "Is it true that drinking hot water cures COVID?"</Message>
+            <Message>📸 Send me a screenshot of a claim, a voice message, or type a claim to fact-check!
+
+Example: "Is it true that drinking hot water cures COVID?"</Message>
         </Response>"""
         return Response(content=twiml, media_type="application/xml")
     
     # Process the message
     gateway = WhatsAppGatewayTool()
     message = gateway.receive_message(
-        text=Body.strip(),
+        text=claim_text,
         sender_phone=From,
-        is_forwarded=gateway._detect_forwarded(Body),
+        is_forwarded=gateway._detect_forwarded(claim_text),
     )
     
     print(f"[WhatsApp] Processing claim: {message.text[:100]}...")

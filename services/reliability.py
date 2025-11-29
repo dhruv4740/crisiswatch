@@ -313,6 +313,64 @@ def calculate_source_diversity(search_results: list) -> float:
     return round(diversity_score, 3)
 
 
+def get_source_credibility(url: str) -> dict:
+    """
+    Get detailed credibility information for a source.
+    
+    Args:
+        url: Source URL
+        
+    Returns:
+        Dict with credibility details
+    """
+    domain = _extract_domain(url)
+    score, source_type = get_reliability_score(url=url)
+    
+    # Determine credibility tier
+    if score >= 0.90:
+        tier = "high"
+        tier_label = "Highly Credible"
+        tier_description = "Official sources, major fact-checkers, or established news wire services"
+    elif score >= 0.80:
+        tier = "good"
+        tier_label = "Generally Credible"
+        tier_description = "Established news organizations with editorial standards"
+    elif score >= 0.65:
+        tier = "moderate"
+        tier_label = "Moderately Credible"
+        tier_description = "Mixed reliability - verify with other sources"
+    elif score >= 0.50:
+        tier = "low"
+        tier_label = "Lower Credibility"
+        tier_description = "Use with caution - may have bias or accuracy issues"
+    else:
+        tier = "unverified"
+        tier_label = "Unverified"
+        tier_description = "Unknown source - requires additional verification"
+    
+    # Source type labels
+    type_labels = {
+        "fact_check": "🔍 Fact-Checking Organization",
+        "official": "🏛️ Official/Government Source",
+        "news": "📰 News Organization",
+        "wikipedia": "📚 Wikipedia",
+        "web": "🌐 Web Source"
+    }
+    
+    return {
+        "domain": domain,
+        "score": score,
+        "score_percentage": round(score * 100),
+        "source_type": source_type,
+        "source_type_label": type_labels.get(source_type, "🌐 Web Source"),
+        "tier": tier,
+        "tier_label": tier_label,
+        "tier_description": tier_description,
+        "is_factcheck_org": source_type == "fact_check",
+        "is_official": source_type == "official",
+    }
+
+
 def get_diversity_breakdown(search_results: list) -> dict:
     """
     Get detailed breakdown of source diversity.

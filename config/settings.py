@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     google_factcheck_api_key: str = Field(default="", alias="GOOGLE_FACTCHECK_API_KEY")
     newsapi_key: str = Field(default="", alias="NEWSAPI_KEY")
     
+    # Twilio (for WhatsApp)
+    twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
+    twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
+    
     # Configuration
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     default_language: Literal["en", "hi"] = Field(default="en", alias="DEFAULT_LANGUAGE")
@@ -48,6 +52,11 @@ class Settings(BaseSettings):
     def has_newsapi(self) -> bool:
         """Check if NewsAPI key is configured."""
         return bool(self.newsapi_key and self.newsapi_key != "your_newsapi_key_here")
+    
+    @property
+    def has_twilio(self) -> bool:
+        """Check if Twilio credentials are configured."""
+        return bool(self.twilio_account_sid and self.twilio_auth_token)
 
 
 @lru_cache

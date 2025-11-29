@@ -178,7 +178,18 @@ Respond in JSON format:
     "source_agreement": "strong_consensus|majority_agree|mixed|conflicting|insufficient",
     "reasoning": "Detailed explanation WITH SPECIFIC DATES. If sources mention when events occurred, include those dates. Example: 'BBC reported this blast occurred on November 25, 2025 at 18:52 local time, not 30 minutes ago.'",
     "detected_tactics": ["list any misinformation tactics detected, if any"],
-    "why_false_explanation": "If verdict is false/mostly_false, explain WHY with specific dates if timing is the issue"
+    "why_false_explanation": "If verdict is false/mostly_false, explain WHY with specific dates if timing is the issue",
+    "side_by_side": {{
+        "claim_points": ["Key point 1 from the claim", "Key point 2 from the claim"],
+        "fact_points": ["What the evidence actually shows for point 1", "What the evidence actually shows for point 2"],
+        "discrepancies": ["Specific discrepancy 1 between claim and facts", "Specific discrepancy 2"]
+    }},
+    "misinformation_analysis": {{
+        "primary_issue": "The main reason this claim is false/misleading (e.g., 'Event date is misrepresented')",
+        "tactics_used": ["list of tactics like: exaggeration, cherry_picking, out_of_context, false_causation, appeal_to_emotion, outdated_info, missing_context"],
+        "context_missing": ["Important context 1 that was omitted", "Important context 2"],
+        "manipulation_techniques": ["Fear-mongering", "Urgency", "Conspiracy framing", etc. if detected]
+    }}
 }}
 """
 

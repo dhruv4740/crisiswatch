@@ -5,7 +5,10 @@ Defines the state schema for the LangGraph workflow.
 
 from typing import TypedDict, Optional, Annotated
 from operator import add
-from models.schemas import Claim, Evidence, VerdictType, SeverityLevel, SearchResult
+from models.schemas import (
+    Claim, Evidence, VerdictType, SeverityLevel, SearchResult,
+    SideBySideComparison, MisinformationAnalysis
+)
 
 
 class FactCheckState(TypedDict):
@@ -33,6 +36,10 @@ class FactCheckState(TypedDict):
     explanation: str
     explanation_hindi: Optional[str]
     correction: Optional[str]
+    
+    # New: Side-by-side comparison and misinformation analysis
+    side_by_side: Optional[SideBySideComparison]
+    misinformation_analysis: Optional[MisinformationAnalysis]
     
     # Metadata
     sources_checked: int

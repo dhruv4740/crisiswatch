@@ -83,10 +83,91 @@ class FactCheckResult(BaseModel):
     source_diversity: float = Field(
         default=0.0, ge=0.0, le=1.0, description="Source diversity score"
     )
+    # Side-by-side comparison
+    side_by_side: Optional["SideBySideComparison"] = Field(
+        default=None, description="Side-by-side comparison of claim vs facts"
+    )
+    # Why False explanation
+    misinformation_analysis: Optional["MisinformationAnalysis"] = Field(
+        default=None, description="Analysis of misinformation tactics used"
+    )
     checked_at: datetime = Field(default_factory=datetime.now)
     processing_time_seconds: float = Field(
         default=0.0, description="Time taken to process the claim"
     )
+
+
+class SideBySideComparison(BaseModel):
+    """Side-by-side comparison of claim vs verified facts."""
+    claim_points: list[str] = Field(description="Key points from the claim")
+    fact_points: list[str] = Field(description="Corresponding verified facts")
+    discrepancies: list[str] = Field(description="Specific discrepancies identified")
+
+
+class MisinformationTactic(BaseModel):
+    """A misinformation tactic detected in the claim."""
+    name: str = Field(description="Name of the tactic")
+    description: str = Field(description="What this tactic means")
+    detected_example: str = Field(description="Example from the claim")
+
+
+class MisinformationAnalysis(BaseModel):
+    """Analysis of why a claim is false/misleading."""
+    primary_issue: str = Field(description="The main reason the claim is false")
+    tactics_detected: list[MisinformationTactic] = Field(
+        default_factory=list, description="Misinformation tactics identified"
+    )
+    context_missing: list[str] = Field(
+        default_factory=list, description="Important context that was omitted"
+    )
+    manipulation_techniques: list[str] = Field(
+        default_factory=list, description="Emotional/psychological manipulation techniques"
+    )
+
+
+# Common misinformation tactics database
+MISINFORMATION_TACTICS = {
+    "gish_gallop": {
+        "name": "Gish Gallop",
+        "description": "Overwhelming with numerous weak arguments that are time-consuming to refute"
+    },
+    "cherry_picking": {
+        "name": "Cherry Picking",
+        "description": "Selecting only evidence that supports the claim while ignoring contradicting evidence"
+    },
+    "appeal_to_emotion": {
+        "name": "Appeal to Emotion",
+        "description": "Using emotional language to override rational thinking"
+    },
+    "false_authority": {
+        "name": "False Authority",
+        "description": "Citing unqualified sources as experts"
+    },
+    "strawman": {
+        "name": "Strawman Argument",
+        "description": "Misrepresenting an opposing view to make it easier to attack"
+    },
+    "out_of_context": {
+        "name": "Out of Context",
+        "description": "Quotes or statistics taken out of their original context"
+    },
+    "outdated_info": {
+        "name": "Outdated Information",
+        "description": "Using old information as if it's current"
+    },
+    "exaggeration": {
+        "name": "Exaggeration",
+        "description": "Overstating facts or statistics to make them more alarming"
+    },
+    "false_causation": {
+        "name": "False Causation",
+        "description": "Claiming one event caused another without evidence (correlation ≠ causation)"
+    },
+    "missing_context": {
+        "name": "Missing Context",
+        "description": "Omitting crucial details that would change the interpretation"
+    }
+}
 
 
 class SearchResult(BaseModel):

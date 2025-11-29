@@ -211,12 +211,12 @@ class ClaimStore:
     def find_similar(
         self,
         claim_text: str,
-        threshold: float = 0.8,
+        threshold: float = 0.7,
     ) -> list[dict]:
         """
         Find similar claims in the cache.
         
-        Uses simple word overlap similarity.
+        Uses combined similarity (cosine + jaccard + sequence matching).
         
         Args:
             claim_text: Claim to find similar entries for
@@ -225,35 +225,23 @@ class ClaimStore:
         Returns:
             List of similar cached claims
         """
-        normalized = self._normalize_claim(claim_text)
-        words = set(normalized.split())
-        
-        if not words:
-            return []
-        
-        similar = []
+        from .similarity import get_similarity_checker
         
         with self._lock:
-            for entry in self._cache.values():
-                if self._is_expired(entry):
-                    continue
-                
-                entry_words = set(entry["normalized"].split())
-                if not entry_words:
-                    continue
-                
-                # Jaccard similarity
-                intersection = len(words & entry_words)
-                union = len(words | entry_words)
-                similarity = intersection / union if union > 0 else 0
-                
-                if similarity >= threshold:
-                    similar.append({
-                        **entry,
-                        "similarity": similarity,
-                    })
+            # Get all non-expired claims
+            past_claims = [
+                entry for entry in self._cache.values()
+                if not self._is_expired(entry)
+            ]
         
-        return sorted(similar, key=lambda x: x["similarity"], reverse=True)
+        if not past_claims:
+            return []
+        
+        # Use the similarity checker
+        checker = get_similarity_checker()
+        similar = checker.find_similar(claim_text, past_claims, threshold=threshold)
+        
+        return similar
     
     def get_stats(self) -> dict:
         """Get cache statistics."""
